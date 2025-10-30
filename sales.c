@@ -10,7 +10,32 @@
 // Destroy the semaphores & the message queue ;
 // }
 
-shmData    *p;
+// import h files
+
+// from shared mem toy code
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "shmem.h"
+
+// from signals toy code
+#include  <signal.h>
+#include  <sys/wait.h>
+
+// needed for dup2  START HERE include below didnt work
+#include <fcntl.h>
+
+//Wrapper
+#include "wrappers.h"
+
+
+
+shData    *p;
 int        shmid ;
 
 pid_t supervisor_pid;
@@ -26,25 +51,36 @@ key_t msgkey;
 int msgqid;
 int msgflags;
 
+//number of factories, global var needed for cleanup?
+int num_factories;
+
+// child status for waitpid
+int child_status;
+
 
 void clean_up() {
     //send KILL signal to all child processes
     kill(supervisor_pid, SIGKILL);
-    for (int i = 0; i < p->num_factories; i++) {
+    for (int i = 0; i < num_factories; i++) {
         kill(factory_pids[i], SIGKILL);
     }
+
     //clean up semaphores
 
     //remove the shared memory and destroy message queue
     Shmdt(p);
-    shclt(shmid, IPC_RMID, NULL);
+    if (shmctl(shmid, IPC_RMID, NULL) == -1) {
+        printf ("\nP1 Failed to REMOVE shared memory id=%d\n" , shmid );
+        perror( "Reason: " );      
+        exit( -1 ) ;
+    }
 
     msgctl(msgqid, IPC_RMID, NULL);
     
     //wait
-    waitpid(supervisor_pid, &status, 0);
+    waitpid(supervisor_pid, &child_status, 0);
     for (int i = 0; i < num_factories; i++) {
-        waitpid(factory_pids[i], &status, 0);
+        waitpid(factory_pids[i], &child_status, 0);
     }
 }
 
@@ -52,14 +88,14 @@ void clean_up() {
 int main( int argc , char *argv[] ) {
 
     //set up the shared memory & initialize its objects
-    shmkey = ftok("shmem.h", 5) ;
-    shmflg = IPC_CREAT | IPC_EXCL  | S_IRUSR | S_IWUSR ;
+    shmkey = ftok("shmem.h", 5) ; // why is this 5?
+    shmflg = IPC_CREAT | IPC_EXCL  | S_IRUSR | S_IWUSR ; // should group have read and write?
 
     shmid = Shmget(shmkey, SHMEM_SIZE, shmflg) ;
 
     p = Shmat(shmid, NULL, 0) ; 
 
-    int num_factories = atoi(argv[1]);
+    num_factories = atoi(argv[1]);
 
     if (num_factories > MAXFACTORIES) {
         num_factories = MAXFACTORIES;
@@ -75,14 +111,14 @@ int main( int argc , char *argv[] ) {
 
     //message queue set up?
 
-    msgflgs = IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
-    msgkey = ftok(".", 6);
+    msgflags = IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
+    msgkey = ftok(".", 6); // why is this 6?
 
-    msgqid = Msgget(msgkey, msgflgs);
+    msgqid = Msgget(msgkey, msgflags);
 
     // Fork / Execute Supervisor process ;
     
-    supervisor_pid = Fork()
+    supervisor_pid = Fork();
 
     if (supervisor_pid == 0) {
         //redirect stdout
@@ -93,12 +129,28 @@ int main( int argc , char *argv[] ) {
         execlp("./Supervisor", num_factories , NULL);
     }
 
+    // making factory_pids a list by dynamically allocating mem?
+    factory_pids = malloc(num_factories * sizeof(pid_t));
+    if (factory_pids == NULL) {
+        perror("malloc failed");
+        clean_up();  
+    }
+
+
     for (int i = 0; i < num_factories; i++) {
         pid_t factory_pid = Fork();
 
         if (factory_pid == 0){
-            //redirect stdout
+            
+            // open factory.log and check if it failed
             FILE *factory_log = fopen("factory.log", "w");
+            if (fopen == NULL) {
+                perror("fopen failed");
+                clean_up();
+            }
+
+
+            //redirect stdout
             dup2(stdout, "factory.log");
 
             srandom(time(NULL));
@@ -107,7 +159,10 @@ int main( int argc , char *argv[] ) {
             int capacity = (random() % (50 - 10 + 1) + 10);
             int duration = (random() % (1200 - 500 + 1) + 500);
 
-            execlp("./Factory", factory_ID, capacity, duration, NULL)
+            if (execlp("./Factory", factory_ID, capacity, duration, NULL) == -1) {
+                perror("execlp of Factory failed");
+                clean_up();
+            }
         }
 
         factory_pids[i] = factory_pid;
@@ -125,6 +180,16 @@ int main( int argc , char *argv[] ) {
     //give permission using rendezvous semaphore to the supervisor to print
 
     //wait for children/clean up
+    // wait for factory processes
+    
+    for (int i = 0; i < num_factories; i++) {
+        waitpid(factory_pids[i], &child_status, 0);
+    }
+
+    // wait for supervisor
+    waitpid(supervisor_pid, &child_status, 0);
+   
+    // clean up
     clean_up();
     
 }
