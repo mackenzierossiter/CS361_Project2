@@ -1,3 +1,4 @@
+/*
 activeFactories= argv[1] ;
 While ( activeFactories> 0 ) {
 Receive a message from the messgaeQueue ;
@@ -13,3 +14,4 @@ discard any unsupported message
 Inform the Sales that manufacturing is done ;
 Wait for permission from Sales to print final report ;
 Print per-factory production aggregates sorted by Factory ID ;
+*/

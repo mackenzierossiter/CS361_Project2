@@ -53,6 +53,8 @@ int        shmflg;
 //named semaphore vars
 int        semMode;
 int        semflg;
+sem_t      *factoriesDone_sem,  *printPermission_sem ;
+sem_t      *sharedMemMutex_sem, *mutexFactory_sem    ;
 //message queue vars
 key_t msgkey;
 int msgqid;
@@ -76,6 +78,16 @@ void clean_up() {
     }
 
     //clean up semaphores
+    Sem_close (factoriesDone_sem)   ;
+    Sem_close (printPermission_sem) ;
+    Sem_close (sharedMemMutex_sem)       ;
+    Sem_close (mutexFactory_sem)    ;
+
+    Sem_unlink ("/rossitma_factoriesDone_sem "   ) ;
+    Sem_unlink ("/rossitma_printPermission_sem " ) ;
+    Sem_unlink ("/rossitma_sharedMemMutex_sem "       ) ;
+    Sem_unlink ("/rossitma_mutexFactory_sem "    ) ;
+
 
     //remove the shared memory and destroy message queue
     Shmdt(p);
@@ -118,14 +130,7 @@ void sig_handler ( int sig ) {
 
 int main( int argc , char *argv[] ) {
 
-    //set up the shared memory & initialize its objects
-    shmkey = ftok("shmem.h", 5) ; // why is this 5?
-    shmflg = IPC_CREAT | IPC_EXCL  | S_IRUSR | S_IWUSR ; // should group have read and write?
-
-    shmid = Shmget(shmkey, SHMEM_SIZE, shmflg) ;
-
-    p = Shmat(shmid, NULL, 0) ; 
-
+    // Set num Factories and order_size (arguments)
     num_factories = atoi(argv[1]);
 
     if (num_factories > MAXFACTORIES) {
@@ -134,21 +139,52 @@ int main( int argc , char *argv[] ) {
 
     int order_size = atoi(argv[2]);
 
+    
+    //set up the semaphores & the message queue
+
+    // semaphores needed: 1. all factories are done, 2. permission to print
+    //                    3. shared mem semaphore 4. mutex semaphore for factories?
+    semflg = O_CREAT | O_EXCL  ;
+    semMode = S_IRUSR | S_IWUSR ;
+
+    factoriesDone_sem   = (sem_t *) Sem_open( "/rossitma_factoriesDone_sem"   ,      semflg, semMode, 0 ) ;
+    printPermission_sem = (sem_t *) Sem_open( "/rossitma_printPermission_sem" ,      semflg, semMode, 0 ) ;
+    sharedMemMutex_sem  = (sem_t *) Sem_open( "/rossitma_sharedMemMutex_sem"  ,      semflg, semMode, 1 ) ;
+    mutexFactory_sem    = (sem_t *) Sem_open( "/rossitma_mutexFactory_sem"    ,      semflg, semMode, 1 ) ;
+
+
+    //set up the shared memory & initialize its objects
+    shmkey = ftok("shmem.h", 5) ; // was 5 on semaphore lab.  Why?
+    shmflg = IPC_CREAT | IPC_EXCL  | S_IRUSR | S_IWUSR ; // should group have read and write?
+
+    shmid = Shmget(shmkey, SHMEM_SIZE, shmflg) ;
+
+    p = Shmat(shmid, NULL, 0) ; 
+
+    
+    // lock shared memory semaphore
+    Sem_wait ( sharedMemMutex_sem ) ;
 
     p->order_size = order_size;    p->made = 0;    p->remain = order_size;
 
-    //set up the semaphores & the message queue
-    //idk what semaphores yet :(
+    // unlock shared memory semaphore
+    Sem_post ( sharedMemMutex_sem ) ;
 
-    //message queue set up?
+
+    //message queue set up
 
     msgflags = IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
-    msgkey = ftok(".", 6); // why is this 6?
+    msgkey = ftok(".", 1);
 
     msgqid = Msgget(msgkey, msgflags);
 
+
     // Fork / Execute Supervisor process ;
     
+    // lock print semaphore until ready
+    Sem_wait ( printPermission_sem ) ;
+
+
     supervisor_pid = Fork();
 
     if (supervisor_pid == 0) {
@@ -219,11 +255,13 @@ int main( int argc , char *argv[] ) {
     sigactionWrapper ( SIGTERM,  sig_handler ) ;
 
     //wait for supervisor via rendezvous semaphore
+    Sem_wait ( factoriesDone_sem ) ;
 
     //simulate printer by sleeping
     Usleep(2);
-
+    
     //give permission using rendezvous semaphore to the supervisor to print
+    Sem_post ( printPermission_sem ) ;
 
     //wait for children/clean up
     clean_up();
