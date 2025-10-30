@@ -27,8 +27,15 @@
 #include  <signal.h>
 #include  <sys/wait.h>
 
-// needed for dup2  START HERE include below didnt work
+// needed for opening files  
 #include <fcntl.h>
+
+// needed for time
+#include <time.h>
+
+// needed for signals
+#include  <signal.h>
+
 
 //Wrapper
 #include "wrappers.h"
@@ -58,6 +65,9 @@ int num_factories;
 int child_status;
 
 
+#define  STDOUT_FD	1
+
+
 void clean_up() {
     //send KILL signal to all child processes
     kill(supervisor_pid, SIGKILL);
@@ -82,8 +92,29 @@ void clean_up() {
     for (int i = 0; i < num_factories; i++) {
         waitpid(factory_pids[i], &child_status, 0);
     }
+
+    //free factory_pid list
+    free(factory_pids) ;
 }
 
+void sig_handler ( int sig ) {
+    fflush ( stdout ) ;
+    printf( "\n sales has been ") ;
+
+    switch( sig ) {
+        case SIGTERM:
+            printf("nicely asked to TERMINATE by SIGTERM ( %d ).\n" , sig ) ;
+            break ;
+        
+        case SIGINT:
+            printf("INTERRUPTED by SIGINT ( %d )\n" , sig ) ;
+            break ;
+
+        default:
+            printf("unexpectedly SIGNALed by ( %d )\n" , sig ) ;
+    }
+    clean_up() ;
+}
 
 int main( int argc , char *argv[] ) {
 
@@ -121,12 +152,28 @@ int main( int argc , char *argv[] ) {
     supervisor_pid = Fork();
 
     if (supervisor_pid == 0) {
-        //redirect stdout
-        FILE *supervisor_log = fopen("supervisor.log", "w");
-        dup2(stdout, "supervisor.log");
 
-        //execute
-        execlp("./Supervisor", num_factories , NULL);
+        // open supervisor file
+        int supervisorFD = open( "supervisor.log" , O_RDWR | O_CREAT | O_EXCL ) ;
+        if (supervisorFD == -1) {
+            perror("supervisor open failed");
+            clean_up();
+        }
+
+
+        //redirect stdout
+        if (dup2(STDOUT_FD, supervisorFD) == -1) {
+            perror("supervisor dup2 failed");
+            clean_up();
+        }
+
+        char factories_amount_buf[MAXFACTORIES];
+        
+        // exec supervisor
+        if (execlp("./Supervisor", "Supervisor", factories_amount_buf , NULL) == -1) {
+            perror("Execlp of Supervisor failed");
+            clean_up();
+        }
     }
 
     // making factory_pids a list by dynamically allocating mem?
@@ -142,16 +189,15 @@ int main( int argc , char *argv[] ) {
 
         if (factory_pid == 0){
             
-            // open factory.log and check if it failed
-            FILE *factory_log = fopen("factory.log", "w");
-            if (fopen == NULL) {
-                perror("fopen failed");
+            // open factory.log and check if it failed    
+            int factoryFD = open( "factory.log", O_RDWR | O_CREAT | O_EXCL ) ;
+            if (factoryFD == -1) {
+                perror( "factory open failed" ) ;
                 clean_up();
             }
 
-
             //redirect stdout
-            dup2(stdout, "factory.log");
+            dup2( STDOUT_FD, factoryFD );
 
             srandom(time(NULL));
 
@@ -159,7 +205,7 @@ int main( int argc , char *argv[] ) {
             int capacity = (random() % (50 - 10 + 1) + 10);
             int duration = (random() % (1200 - 500 + 1) + 500);
 
-            if (execlp("./Factory", factory_ID, capacity, duration, NULL) == -1) {
+            if (execlp("./Factory", "Factory", factory_ID, capacity, duration, NULL) == -1) {
                 perror("execlp of Factory failed");
                 clean_up();
             }
@@ -169,8 +215,8 @@ int main( int argc , char *argv[] ) {
     }
 
     //handle abnormal termination
-    sigactionWrapper(SIGINT, clean_up());
-    sigactionWrapper(SIGTERM, clean_up());
+    sigactionWrapper ( SIGINT ,  sig_handler ) ;
+    sigactionWrapper ( SIGTERM,  sig_handler ) ;
 
     //wait for supervisor via rendezvous semaphore
 
@@ -180,16 +226,6 @@ int main( int argc , char *argv[] ) {
     //give permission using rendezvous semaphore to the supervisor to print
 
     //wait for children/clean up
-    // wait for factory processes
-    
-    for (int i = 0; i < num_factories; i++) {
-        waitpid(factory_pids[i], &child_status, 0);
-    }
-
-    // wait for supervisor
-    waitpid(supervisor_pid, &child_status, 0);
-   
-    // clean up
     clean_up();
     
 }
