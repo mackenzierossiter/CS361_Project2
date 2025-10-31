@@ -1,3 +1,5 @@
+// Mackenzie Rossiter and Gwen Lumsden
+
 // {
 // Set up shared memory & initialize its objects ;
 // Set up the semaphores & the message queue ;
