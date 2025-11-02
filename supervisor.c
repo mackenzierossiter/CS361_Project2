@@ -15,3 +15,26 @@ Inform the Sales that manufacturing is done ;
 Wait for permission from Sales to print final report ;
 Print per-factory production aggregates sorted by Factory ID ;
 */
+
+int activeFactories;
+
+int main (ing argc, char *argv[]) 
+{
+    //initilize number of factory lines from sales
+    activeFactories = argv[1];
+
+    //set up message queue
+
+    key_t salesKey;
+    char *salesPath = "./sales" ;
+    salesKey = ftok (salesPath, 1) ;
+    if (salesKey = -1) 
+    {
+        perror ( "Error produced by ftok mq in factory " ) ;
+        clean_up() ;
+    }
+
+    
+
+
+}
