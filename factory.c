@@ -138,7 +138,7 @@ int main (int argc, char *argv[])
             p->remain -= capacity;
             Sem_post (sharedMemMutex_sem ) ;
             partsIMade = capacity ;
-            
+
         } else {
             
             Sem_wait (sharedMemMutex_sem ) ;
@@ -168,6 +168,7 @@ int main (int argc, char *argv[])
         msgBufferProd.facID     = factory_ID ;
         msgBufferProd.capacity  = capacity ;
         msgBufferProd.partsMade = partsIMade ;
+        msgBufferProd.iteration  = iterations ;
         msgBufferProd.duration  = duration;
 
         
@@ -194,6 +195,7 @@ int main (int argc, char *argv[])
     msgBufferComplete.facID     = factory_ID ;
     msgBufferComplete.capacity  = capacity ;
     msgBufferComplete.partsMade = partsIMade ;
+    msgBufferComplete.iteration  = iterations ;
     msgBufferComplete.duration  = duration;
 
     
