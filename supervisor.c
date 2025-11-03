@@ -16,9 +16,39 @@ Wait for permission from Sales to print final report ;
 Print per-factory production aggregates sorted by Factory ID ;
 */
 
+// from shared mem toy code
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+
+#include "shmem.h"
+
+// for message queue
+#include <sys/msg.h>
+
+#include "message.h"
+
+// for semaphores
+#include <fcntl.h>
+#include <semaphore.h>
+
+//Wrapper
+#include "wrappers.h"
+
 int activeFactories;
 int msgStatus;
 msgBuf factoryMsg;
+// semaphores global vars
+sem_t *factoriesDone_sem ; 
+sem_t *printPermission_sem ;
+shData *p;
+int totalFactories;
+
 
 typedef struct {
     int facID;
@@ -26,12 +56,22 @@ typedef struct {
     int numIterations;
 } per_factory_stats;
 
+void clean_up() {
+
+    Shmdt(p);
+
+    sem_close(factoriesDone_sem);
+    sem_close(printPermission_sem);
+
+}
+
 
 int main (int argc, char *argv[]) 
 {
     //initilize number of factory lines from sales
     activeFactories = atoi(argv[1]);
     per_factory_stats stats[activeFactories];
+    totalFactories = activeFactories;
 
     //initialize factory stats
     for (int i = 0; i < activeFactories; i++) {
@@ -47,7 +87,7 @@ int main (int argc, char *argv[])
     if (salesKey == -1) 
     {
         perror ( "Error produced by ftok mq in factory " ) ;
-        clean_up() ;
+        clean_up();
     }
 
     int msgflgs = S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
@@ -59,7 +99,7 @@ int main (int argc, char *argv[])
 
     int shmid = Shmget(shmkey, SHMEM_SIZE, shmflg) ;
 
-    shmData p = Shmat(shmid, NULL, 0) ; 
+    p = Shmat(shmid, NULL, 0) ; 
 
     //initialize rendezvour semaphores
     int semflg = O_RDWR;
@@ -70,6 +110,11 @@ int main (int argc, char *argv[])
     while (activeFactories > 0) {
         //need to check msgStatus
         msgStatus = msgrcv(msgid, &factoryMsg, MSG_INFO_SIZE, 0, 0);
+        if (msgStatus != 0) {
+            perror("Failed to Recieve message");
+            fflush(stdout);
+            clean_up();
+        }
         if (factoryMsg.purpose == PRODUCTION_MSG) {
             printf("Factory %d produced %d in %d milliSecs\n", factoryMsg.facID, factoryMsg.partsMade, factoryMsg.duration);
             stats[factoryMsg.facID].partsBuilt = factoryMsg.partsMade;
@@ -81,6 +126,7 @@ int main (int argc, char *argv[])
             //do nothing i guess??
             printf("Unsupported message");
         }
+        fflush(stdout);
     }
 
     //tell sales factories are done
@@ -91,13 +137,15 @@ int main (int argc, char *argv[])
 
     //Print per-factory production aggregates sorted by Factory ID ;
     printf("\n****** SUPERVISOR: Final Report ******\n");
-    for (int i = 0; i < activeFactories; i++) {
-        printf("Factory # %d made a total of %3d parts in %td iterations\n", stats[i].facID, stats[i].partsBuilt, stats[i].numIterations);
+    for (int i = 0; i < totalFactories; i++) {
+        printf("Factory # %d made a total of %3d parts in \t%d iterations\n", stats[i].facID, stats[i].partsBuilt, stats[i].numIterations);
     }
 
     printf("=======================\n");
-    printf("Grand total parts made =%td   vs   order size of %td\n", p->made, p->order_size);
-    printf(">>> Supervisor Terminated")
+    printf("Grand total parts made =\t%d   vs   order size of \t%d\n", p->made, p->order_size);
+    printf(">>> Supervisor Terminated");
+    fflush(stdout);
 
+    clean_up();
 
 }

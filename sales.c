@@ -186,6 +186,8 @@ int main( int argc , char *argv[] ) {
     // lock print semaphore until ready
     Sem_wait ( printPermission_sem ) ;
 
+    printf("SALES: Will Request an Order of Size = %d parts\n", order_size);
+    fflush(stdout);
 
     supervisor_pid = Fork();
 
@@ -221,7 +223,7 @@ int main( int argc , char *argv[] ) {
         clean_up();  
     }
 
-
+    printf("Creating %d Factory(ies)", num_factories);
     for (int i = 0; i < num_factories; i++) {
         pid_t factory_pid = Fork();
 
@@ -247,6 +249,10 @@ int main( int argc , char *argv[] ) {
                 perror("execlp of Factory failed");
                 clean_up();
             }
+
+            printf("SALES: Factory # %4d was created, with Capacity=%4d and Duration=%4d\n", factory_ID, capacity, duration);
+            fflush(stdout);
+        
         }
 
         factory_pids[i] = factory_pid;
@@ -258,14 +264,20 @@ int main( int argc , char *argv[] ) {
 
     //wait for supervisor via rendezvous semaphore
     Sem_wait ( factoriesDone_sem ) ;
+    printf("SALES: Supervisor says all Factories have completed their mission\n");
+    fflush(stdout);
 
     //simulate printer by sleeping
     Usleep(2);
     
     //give permission using rendezvous semaphore to the supervisor to print
     Sem_post ( printPermission_sem ) ;
+    printf("SALES: Permission granted to print final report\n");
+    fflush(stdout);
 
     //wait for children/clean up
+    printf("SALES: Cleaning up after the Supervisor Factory Processes");
+    fflush(stdout);
     clean_up();
     
 }
