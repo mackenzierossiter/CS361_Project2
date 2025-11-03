@@ -18,6 +18,7 @@ typedef struct {
     int  facID    ,          /* sender's Factory ID */
          capacity ,          /* #of parts made in most recent iteration */
          partsMade ,         /* #of parts made in most recent iteration */
+         iteration ,         /* current iteration number of factory */
          duration ;          /* how long it took to make them */
 
 } msgBuf ;
