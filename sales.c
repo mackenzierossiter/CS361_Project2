@@ -176,7 +176,7 @@ int main( int argc , char *argv[] ) {
     //message queue set up
 
     msgflags = IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
-    msgkey = ftok(".", 1);
+    msgkey = ftok("message.h", 1);
 
     msgqid = Msgget(msgkey, msgflags);
 

@@ -82,8 +82,7 @@ int main (int argc, char *argv[])
 
     //access message queue
     key_t salesKey;
-    char *salesPath = "./sales" ;
-    salesKey = ftok (salesPath, 1) ;
+    salesKey = ftok ("message.h", 1) ;
     if (salesKey == -1) 
     {
         perror ( "Error produced by ftok mq in factory " ) ;
