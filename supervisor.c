@@ -104,8 +104,8 @@ int main (int argc, char *argv[])
     //initialize rendezvour semaphores
     int semflg = O_RDWR;
 
-    factoriesDone_sem   = Sem_open2( "/rossitma_factoriesDone_sem"   ,      semflg) ;
-    printPermission_sem = Sem_open2( "/rossitma_printPermission_sem" ,      semflg) ;
+    factoriesDone_sem   = Sem_open2( "/lumsdegr_factoriesDone_sem"   ,      semflg) ;
+    printPermission_sem = Sem_open2( "/lumsdegr_printPermission_sem" ,      semflg) ;
 
     while (activeFactories > 0) {
         //need to check msgStatus

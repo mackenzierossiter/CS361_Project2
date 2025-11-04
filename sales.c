@@ -85,10 +85,10 @@ void clean_up() {
     Sem_close (sharedMemMutex_sem)       ;
     Sem_close (mutexFactory_sem)    ;
 
-    Sem_unlink ("/rossitma_factoriesDone_sem "   ) ;
-    Sem_unlink ("/rossitma_printPermission_sem " ) ;
-    Sem_unlink ("/rossitma_sharedMemMutex_sem "       ) ;
-    Sem_unlink ("/rossitma_mutexFactory_sem "    ) ;
+    Sem_unlink ("/lumsdegr_factoriesDone_sem"   ) ;
+    Sem_unlink ("/lumsdegr_printPermission_sem" ) ;
+    Sem_unlink ("/lumsdegr_sharedMemMutex_sem"       ) ;
+    Sem_unlink ("/lumsdegr_mutexFactory_sem"    ) ;
 
 
     //remove the shared memory and destroy message queue
@@ -149,10 +149,10 @@ int main( int argc , char *argv[] ) {
     semflg = O_CREAT | O_EXCL  ;
     semMode = S_IRUSR | S_IWUSR ;
 
-    factoriesDone_sem   = (sem_t *) Sem_open( "/rossitma_factoriesDone_sem"   ,      semflg, semMode, 0 ) ;
-    printPermission_sem = (sem_t *) Sem_open( "/rossitma_printPermission_sem" ,      semflg, semMode, 0 ) ;
-    sharedMemMutex_sem  = (sem_t *) Sem_open( "/rossitma_sharedMemMutex_sem"  ,      semflg, semMode, 1 ) ;
-    mutexFactory_sem    = (sem_t *) Sem_open( "/rossitma_mutexFactory_sem"    ,      semflg, semMode, 1 ) ;
+    factoriesDone_sem   = (sem_t *) Sem_open( "/lumsdegr_factoriesDone_sem"   ,      semflg, semMode, 0 ) ;
+    printPermission_sem = (sem_t *) Sem_open( "/lumsdegr_printPermission_sem" ,      semflg, semMode, 0 ) ;
+    sharedMemMutex_sem  = (sem_t *) Sem_open( "/lumsdegr_sharedMemMutex_sem"  ,      semflg, semMode, 1 ) ;
+    mutexFactory_sem    = (sem_t *) Sem_open( "/lumsdegr_mutexFactory_sem"    ,      semflg, semMode, 1 ) ;
 
 
     //set up the shared memory & initialize its objects
@@ -184,7 +184,7 @@ int main( int argc , char *argv[] ) {
     // Fork / Execute Supervisor process ;
     
     // lock print semaphore until ready
-    Sem_wait ( printPermission_sem ) ;
+    //Sem_wait ( printPermission_sem ) ;
 
     printf("SALES: Will Request an Order of Size = %d parts\n", order_size);
     fflush(stdout);
@@ -202,7 +202,7 @@ int main( int argc , char *argv[] ) {
 
 
         //redirect stdout
-        if (dup2(STDOUT_FD, supervisorFD) == -1) {
+        if (dup2(supervisorFD, STDOUT_FD) == -1) {
             perror("supervisor dup2 failed");
             clean_up();
         }
@@ -210,7 +210,7 @@ int main( int argc , char *argv[] ) {
         char factories_amount_buf[MAXFACTORIES];
         
         // exec supervisor
-        if (execlp("./Supervisor", "Supervisor", factories_amount_buf , NULL) == -1) {
+        if (execlp("./supervisor", "Supervisor", factories_amount_buf , NULL) == -1) {
             perror("Execlp of Supervisor failed");
             clean_up();
         }
@@ -230,22 +230,28 @@ int main( int argc , char *argv[] ) {
         if (factory_pid == 0){
             
             // open factory.log and check if it failed    
-            int factoryFD = open( "factory.log", O_RDWR | O_CREAT | O_EXCL ) ;
+            int factoryFD = open( "factory.log", O_RDWR | O_CREAT, 0666 ) ;
             if (factoryFD == -1) {
                 perror( "factory open failed" ) ;
                 clean_up();
             }
 
             //redirect stdout
-            dup2( STDOUT_FD, factoryFD );
+            dup2(  factoryFD, STDOUT_FD );
 
             srandom(time(NULL));
 
-            int factory_ID = i;
+            int factory_ID = i + 1;
             int capacity = (random() % (50 - 10 + 1) + 10);
             int duration = (random() % (1200 - 500 + 1) + 500);
 
-            if (execlp("./Factory", "Factory", factory_ID, capacity, duration, NULL) == -1) {
+            //cast to string for exec
+            char factory_ID_buf[16], capacity_buf[16], duration_buf[16];
+            snprintf(factory_ID_buf, sizeof(factory_ID_buf), "%d", factory_ID);
+            snprintf(capacity_buf, sizeof(capacity_buf), "%d", capacity);
+            snprintf(duration_buf, sizeof(duration_buf), "%d", duration);
+
+            if (execlp("./factory", "Factory", factory_ID_buf, capacity_buf, duration_buf, NULL) == -1) {
                 perror("execlp of Factory failed");
                 clean_up();
             }

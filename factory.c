@@ -57,8 +57,8 @@ void clean_up ()
     // message queue will be removed in sales
 
     // close semaphores
-    Sem_close ( sharedMemMutex_sem ) ;
-    Sem_close ( mutexFactory_sem   ) ;
+    Sem_close( sharedMemMutex_sem ) ;
+    Sem_close( mutexFactory_sem   ) ;
 
 }
 
@@ -73,17 +73,17 @@ int main (int argc, char *argv[])
     // connect to shared memory
     key_t shmKey;
     int   shmflg;
-    int   shmid;
+    //int   shmid;
 
-    shmKey = ftok ("shmem.h" , 5) ;
+    shmKey = ftok("shmem.h" , 5) ;
     if (shmKey == -1) 
     {
-        perror ( "Error produced by ftok shm in factory " ) ;
+        perror( "Error produced by ftok shm in factory " ) ;
         fflush(stdout);
         clean_up() ;
     }
     shmflg = S_IRUSR | S_IWUSR ;
-    shmid  = Shmget (shmKey, SHMEM_SIZE, shmflg ) ;
+    shmid  = Shmget(shmKey, SHMEM_SIZE, shmflg ) ;
     p      = (shData *) Shmat( shmid , NULL , 0 ) ;
 
 
@@ -92,10 +92,10 @@ int main (int argc, char *argv[])
     // find key of message queue already created by sales
     key_t salesKey;
     char *salesPath = "./sales" ;
-    salesKey = ftok (salesPath, 1) ;
+    salesKey = ftok(salesPath, 1) ;
     if (salesKey = -1) 
     {
-        perror ( "Error produced by ftok mq in factory " ) ;
+        perror( "Error produced by ftok mq in factory " ) ;
         fflush(stdout);
         clean_up() ;
     }
@@ -109,8 +109,8 @@ int main (int argc, char *argv[])
     // create semaphores
     int semflg = O_RDWR;
 
-    sharedMemMutex_sem = Sem_open2 ("/rossitma_sharedMemMutex_sem" , semflg ) ;
-    mutexFactory_sem   = Sem_open2 ("/rossitma_mutexFactory_sem"   , semflg ) ;
+    sharedMemMutex_sem = Sem_open2 ("/lumsdegr_sharedMemMutex_sem" , semflg ) ;
+    mutexFactory_sem   = Sem_open2 ("/lumsdegr_mutexFactory_sem"   , semflg ) ;
 
     
 
