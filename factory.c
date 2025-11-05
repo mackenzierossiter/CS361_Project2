@@ -47,7 +47,6 @@ sem_t *sharedMemMutex_sem ;
 sem_t *mutexFactory_sem ;
 
 
-
 void clean_up ()
 {
 
@@ -88,30 +87,33 @@ int main (int argc, char *argv[])
 
 
     // connect to message queue to supervisor
-
     // find key of message queue already created by sales
     key_t salesKey;
     salesKey = ftok("message.h", 1) ;
     if (salesKey == -1) 
     {
         perror( "Error produced by ftok mq in factory " ) ;
-        fflush(stdout);
+        fflush(stdout) ;
         clean_up() ;
     }
 
     // find sales message queue
-    int msgflags = S_IWUSR; // when creating message queue in supervisor, 
+    int msgflags = S_IWUSR ; // when creating message queue in supervisor, 
                             // supervisor will have read only access?
-    int SalesMailboxID = Msgget(salesKey, msgflags);
+    int SalesMailboxID = Msgget(salesKey, msgflags) ;
 
 
     // create semaphores
-    int semflg = O_RDWR;
+    int semflg = O_RDWR ;
 
     sharedMemMutex_sem = Sem_open2 ("/lumsdegr_sharedMemMutex_sem" , semflg ) ;
     mutexFactory_sem   = Sem_open2 ("/lumsdegr_mutexFactory_sem"   , semflg ) ;
 
-    
+    //start factory process
+    Sem_wait ( mutexFactory_sem ) ;
+        printf("Factory #%3d: STARTED. My Capacity = %3d, in %4d milliSeconds\n", factory_ID, capacity, duration) ;
+        fflush(stdout) ;
+    Sem_post ( mutexFactory_sem ) ;
 
     // initialize and declare variables needed for loop
     // made need to get rid of cause its in while
@@ -119,97 +121,94 @@ int main (int argc, char *argv[])
     int remain = p->remain ;
     Sem_post ( sharedMemMutex_sem ) ;
 
-    int partsIMade      = 0 ;
-    int totalPartsIMade = 0;
+    //int partsIMade      = 0 ;
+    int totalPartsIMade = 0 ;
     int iterations      = 0 ;
 
-    // starting item creation loop
-    Sem_wait ( sharedMemMutex_sem ) ;
-    while ( p->remain > 0 )
+    // starting factory processes
+    while ( remain > 0 ) 
     {
-        Sem_post ( sharedMemMutex_sem ) ;
-
-        //update remain based on expected products to be made
-        if ( remain > capacity )
-        {
-            
-            Sem_wait (sharedMemMutex_sem ) ;
-            p->remain -= capacity;
-            Sem_post (sharedMemMutex_sem ) ;
-            partsIMade = capacity ;
-
+        int partsToMake = 0;
+        
+        //lock sharedmem
+        Sem_wait ( sharedMemMutex_sem ) ;
+        
+        //check sharedmem isnt 0
+        if (p->remain <= 0) {
+            remain = 0 ; 
+            Sem_post ( sharedMemMutex_sem ) ;
+            break;  //exit if it is
+        }
+        //check that what remains is less than max capacity
+        if (p->remain >= capacity) {
+            partsToMake = capacity ;
         } else {
-            
-            Sem_wait (sharedMemMutex_sem ) ;
-            partsIMade = p->remain;
-            p->remain = 0;
-            Sem_post (sharedMemMutex_sem ) ;
-            
+            partsToMake = p->remain ;
         }
 
-        // hi
-        // does supervisor get the same messages at factory.log?
-
-        // print to factory log
-        Sem_wait ( mutexFactory_sem ) ;
-        printf( "Factory #%3d: Going to make %5d parts in %4d milliSecs" , factory_ID, capacity, duration) ;
-        Sem_post ( mutexFactory_sem ) ;
-        fflush(stdout);
-
-        // simulate making items
-        int sleep_time = duration * 1000 ;
-        usleep( sleep_time ) ;
-
+        //update sharedmem vars
+        p->remain -= partsToMake ;
+        p->made += partsToMake   ;
+        remain = p->remain       ;
         
-        // creating message buf to send message
+        //unlock mutex
+        Sem_post ( sharedMemMutex_sem ) ;
+
+
+        Sem_wait ( mutexFactory_sem ) ;
+        printf( "Factory #%3d: Going to make %5d parts in %4d milliSecs\n", factory_ID, partsToMake, duration ) ;
+        fflush(stdout) ;
+        Sem_post ( mutexFactory_sem ) ;
+
+        //sleep
+        usleep( duration * 1000 );
+
+        //update gloabal vars
+        iterations++;
+        totalPartsIMade += partsToMake;
+
+        //create msg to send to supervisor
         msgBuf msgBufferProd ;
+        msgBufferProd.mtype     = 1 ;
         msgBufferProd.purpose   = PRODUCTION_MSG ;
         msgBufferProd.facID     = factory_ID ;
         msgBufferProd.capacity  = capacity ;
-        msgBufferProd.partsMade = partsIMade ;
-        msgBufferProd.iteration  = iterations ;
-        msgBufferProd.duration  = duration;
+        msgBufferProd.partsMade = partsToMake ;
+        msgBufferProd.iteration = iterations ;
+        msgBufferProd.duration  = duration ;
 
+
+        int msgStatus = msgsnd(SalesMailboxID, &msgBufferProd, MSG_INFO_SIZE, 0) ;
+        if (msgStatus == -1) {
+            perror("msgsnd production message failed");
+        }
         
-        // send message to supervisor
-        int msgStatus = msgsnd ( SalesMailboxID, &msgBufferProd,  MSG_INFO_SIZE, 0 ) ;
-
-
-        // how do i keep track of how many items the factory actually made?
-        totalPartsIMade += partsIMade ;
-        iterations++;
-
-
-
-        Sem_wait (sharedMemMutex_sem) ; // needed for while condition
     }
-
-    Sem_post ( sharedMemMutex_sem ) ; // needed to unlock final while condition
-
-
 
     // sending completion message to supervisor
     msgBuf msgBufferComplete ;
+    msgBufferComplete.mtype     = 1 ;
     msgBufferComplete.purpose   = COMPLETION_MSG ;
     msgBufferComplete.facID     = factory_ID ;
     msgBufferComplete.capacity  = capacity ;
-    msgBufferComplete.partsMade = partsIMade ;
-    msgBufferComplete.iteration  = iterations ;
-    msgBufferComplete.duration  = duration;
+    msgBufferComplete.partsMade = totalPartsIMade ;
+    msgBufferComplete.iteration = iterations ;
+    msgBufferComplete.duration  = duration ;
 
     
     // send message to supervisor
     int msgStatus = msgsnd ( SalesMailboxID, &msgBufferComplete,  MSG_INFO_SIZE, 0 ) ;
 
-    // print go log
+    // print factories done
     Sem_wait ( mutexFactory_sem ) ;
-    printf("Factory Line %d: Completed after making total of %d parts in %d iterations", factory_ID, totalPartsIMade, iterations ) ;
-    Sem_post ( mutexFactory_sem ) ;
+    printf(">>> Factory # %3d: Terminating after making total of %4d parts in %4d iterations\n", factory_ID, totalPartsIMade, iterations ) ;
     fflush(stdout);
+    Sem_post ( mutexFactory_sem ) ;
+    
 
     // decrease number of active factories by 1
     Sem_wait (sharedMemMutex_sem ) ;
-    p->activeFactories --;
+    p->activeFactories-- ;
     Sem_post ( sharedMemMutex_sem ) ;
 
     clean_up() ;

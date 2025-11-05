@@ -43,7 +43,7 @@
 #include "wrappers.h"
 
 
-
+//idk whats going on here
 shData    *p;
 int        shmid ;
 
@@ -73,11 +73,21 @@ int child_status;
 
 
 void clean_up() {
-    //send KILL signal to all child processes
-    kill(supervisor_pid, SIGKILL);
-    for (int i = 0; i < num_factories; i++) {
-        kill(factory_pids[i], SIGKILL);
+    //wait for all children to die
+    waitpid( supervisor_pid, &child_status, 0 );
+    for ( int i = 0; i < num_factories; i++ ) {
+        waitpid( factory_pids[i], &child_status, 0 );
     }
+
+    //free factory_pid list
+    free(factory_pids) ;
+    
+    //had to move bc we only need to kill when terminated
+    //send KILL signal to all child processes
+    // kill(supervisor_pid, SIGKILL);
+    // for (int i = 0; i < num_factories; i++) {
+    //     kill(factory_pids[i], SIGKILL);
+    // }
 
     //clean up semaphores
     Sem_close (factoriesDone_sem)   ;
@@ -94,21 +104,12 @@ void clean_up() {
     //remove the shared memory and destroy message queue
     Shmdt(p);
     if (shmctl(shmid, IPC_RMID, NULL) == -1) {
-        printf ("\nP1 Failed to REMOVE shared memory id=%d\n" , shmid );
-        perror( "Reason: " );      
+        printf ("\nP1 Failed to REMOVE shared memory id=%d\n" , shmid ) ;
+        perror( "Reason: " ) ;      
         exit( -1 ) ;
     }
 
-    msgctl(msgqid, IPC_RMID, NULL);
-    
-    //wait
-    waitpid(supervisor_pid, &child_status, 0);
-    for (int i = 0; i < num_factories; i++) {
-        waitpid(factory_pids[i], &child_status, 0);
-    }
-
-    //free factory_pid list
-    free(factory_pids) ;
+    msgctl( msgqid, IPC_RMID, NULL ) ;
 }
 
 void sig_handler ( int sig ) {
@@ -127,6 +128,11 @@ void sig_handler ( int sig ) {
         default:
             printf("unexpectedly SIGNALed by ( %d )\n" , sig ) ;
     }
+    //send KILL signal to all child processes
+    kill( supervisor_pid, SIGKILL ) ;
+    for ( int i = 0; i < num_factories; i++ ) {
+        kill( factory_pids[i], SIGKILL ) ;
+    }
     clean_up() ;
 }
 
@@ -136,17 +142,16 @@ int main( int argc , char *argv[] ) {
     num_factories = atoi(argv[1]);
 
     if (num_factories > MAXFACTORIES) {
-        num_factories = MAXFACTORIES;
+        num_factories = MAXFACTORIES ;
     }
 
-    int order_size = atoi(argv[2]);
+    int order_size = atoi(argv[2]) ;
 
     
     //set up the semaphores & the message queue
-
     // semaphores needed: 1. all factories are done, 2. permission to print
     //                    3. shared mem semaphore 4. mutex semaphore for factories?
-    semflg = O_CREAT | O_EXCL  ;
+    semflg  = O_CREAT | O_EXCL  ;
     semMode = S_IRUSR | S_IWUSR ;
 
     factoriesDone_sem   = (sem_t *) Sem_open( "/lumsdegr_factoriesDone_sem"   ,      semflg, semMode, 0 ) ;
@@ -157,17 +162,18 @@ int main( int argc , char *argv[] ) {
 
     //set up the shared memory & initialize its objects
     shmkey = ftok("shmem.h", 5) ; // was 5 on semaphore lab.  Why?
-    shmflg = IPC_CREAT | IPC_EXCL  | S_IRUSR | S_IWUSR ; // should group have read and write?
+    shmflg = IPC_CREAT | IPC_EXCL  | S_IRUSR | S_IWUSR ;
 
     shmid = Shmget(shmkey, SHMEM_SIZE, shmflg) ;
 
     p = Shmat(shmid, NULL, 0) ; 
 
-    
+    //initialize shared mem objects
     // lock shared memory semaphore
     Sem_wait ( sharedMemMutex_sem ) ;
 
     p->order_size = order_size;    p->made = 0;    p->remain = order_size;
+    p->activeFactories = num_factories;
 
     // unlock shared memory semaphore
     Sem_post ( sharedMemMutex_sem ) ;
@@ -176,92 +182,93 @@ int main( int argc , char *argv[] ) {
     //message queue set up
 
     msgflags = IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
-    msgkey = ftok("message.h", 1);
+    msgkey = ftok( "message.h", 1 ) ;
 
-    msgqid = Msgget(msgkey, msgflags);
+    msgqid = Msgget( msgkey, msgflags ) ;
 
+    //set the seed before forking so it applies to each
+    srandom(time(NULL)) ;
 
     // Fork / Execute Supervisor process ;
-    
-    // lock print semaphore until ready
-    //Sem_wait ( printPermission_sem ) ;
+    printf( "SALES: Will Request an Order of Size = %d parts\n", order_size ) ;
+    fflush(stdout) ;
 
-    printf("SALES: Will Request an Order of Size = %d parts\n", order_size);
-    fflush(stdout);
+    supervisor_pid = Fork() ;
 
-    supervisor_pid = Fork();
-
-    if (supervisor_pid == 0) {
+    if ( supervisor_pid == 0 ) {
 
         // open supervisor file
-        int supervisorFD = open( "supervisor.log" , O_RDWR | O_CREAT | O_EXCL ) ;
-        if (supervisorFD == -1) {
+        int supervisorFD = open( "supervisor.log" , O_RDWR | O_CREAT | O_EXCL, 0600 ) ;
+        if ( supervisorFD == -1 ) {
             perror("supervisor open failed");
             clean_up();
         }
 
-
         //redirect stdout
-        if (dup2(supervisorFD, STDOUT_FD) == -1) {
+        if ( dup2(supervisorFD, STDOUT_FD) == -1 ) {
             perror("supervisor dup2 failed");
             clean_up();
         }
 
-        char factories_amount_buf[MAXFACTORIES];
+        //cast to char pointer for exec args
+        char factories_amount_buf[MAXFACTORIES] ;
+        snprintf( factories_amount_buf, sizeof(factories_amount_buf), "%d", num_factories ) ;
         
         // exec supervisor
-        if (execlp("./supervisor", "Supervisor", factories_amount_buf , NULL) == -1) {
+        if (execlp( "./supervisor", "Supervisor", factories_amount_buf , NULL ) == -1) {
             perror("Execlp of Supervisor failed");
             clean_up();
         }
     }
 
     // making factory_pids a list by dynamically allocating mem?
-    factory_pids = malloc(num_factories * sizeof(pid_t));
-    if (factory_pids == NULL) {
+    factory_pids = malloc( num_factories * sizeof(pid_t) ) ;
+    if ( factory_pids == NULL ) {
         perror("malloc failed");
         clean_up();  
     }
 
-    printf("Creating %d Factory(ies)", num_factories);
-    for (int i = 0; i < num_factories; i++) {
-        pid_t factory_pid = Fork();
+    //Fork / Execute all Factory processes ;
+    printf("Creating %d Factory(ies)\n", num_factories) ;
+    for ( int i = 0; i < num_factories; i++ ) {
+        int factory_ID = i + 1 ;
+        int capacity   = (random() % (50 - 10 + 1) + 10) ;
+        int duration   = (random() % (1200 - 500 + 1) + 500) ;
+        
+        printf("SALES: Factory # %4d was created, with Capacity=%4d and Duration=%4d\n", factory_ID, capacity, duration) ;
+        fflush(stdout) ;
 
-        if (factory_pid == 0){
+        pid_t factory_pid = Fork() ;
+
+        if ( factory_pid == 0 ){
             
             // open factory.log and check if it failed    
-            int factoryFD = open( "factory.log", O_RDWR | O_CREAT, 0666 ) ;
+            int factoryFD = open( "factory.log", O_RDWR | O_CREAT | O_APPEND, 0600 ) ;
             if (factoryFD == -1) {
                 perror( "factory open failed" ) ;
                 clean_up();
             }
 
             //redirect stdout
-            dup2(  factoryFD, STDOUT_FD );
-
-            srandom(time(NULL));
-
-            int factory_ID = i + 1;
-            int capacity = (random() % (50 - 10 + 1) + 10);
-            int duration = (random() % (1200 - 500 + 1) + 500);
-
-            //cast to string for exec
-            char factory_ID_buf[16], capacity_buf[16], duration_buf[16];
-            snprintf(factory_ID_buf, sizeof(factory_ID_buf), "%d", factory_ID);
-            snprintf(capacity_buf, sizeof(capacity_buf), "%d", capacity);
-            snprintf(duration_buf, sizeof(duration_buf), "%d", duration);
-
-            if (execlp("./factory", "Factory", factory_ID_buf, capacity_buf, duration_buf, NULL) == -1) {
-                perror("execlp of Factory failed");
+            if ( dup2(factoryFD, STDOUT_FD) == -1 ) {
+                perror("factory dup2 failed");
                 clean_up();
             }
 
-            printf("SALES: Factory # %4d was created, with Capacity=%4d and Duration=%4d\n", factory_ID, capacity, duration);
-            fflush(stdout);
+            //cast to char pointer for exec
+            char factory_ID_buf[16], capacity_buf[16], duration_buf[16] ;
+            snprintf(factory_ID_buf, sizeof(factory_ID_buf), "%d", factory_ID) ;
+            snprintf(capacity_buf, sizeof(capacity_buf), "%d", capacity) ;
+            snprintf(duration_buf, sizeof(duration_buf), "%d", duration) ;
+
+            if (execlp( "./factory", "Factory", factory_ID_buf, capacity_buf, duration_buf, NULL ) == -1) {
+                perror("execlp of Factory failed");
+                clean_up();
+            }
         
         }
 
-        factory_pids[i] = factory_pid;
+        factory_pids[i] = factory_pid ;
     }
 
     //handle abnormal termination
@@ -270,20 +277,20 @@ int main( int argc , char *argv[] ) {
 
     //wait for supervisor via rendezvous semaphore
     Sem_wait ( factoriesDone_sem ) ;
-    printf("SALES: Supervisor says all Factories have completed their mission\n");
-    fflush(stdout);
+    printf("SALES: Supervisor says all Factories have completed their mission\n") ;
+    fflush(stdout) ;
 
     //simulate printer by sleeping
-    Usleep(2);
+    Usleep(2) ;
     
     //give permission using rendezvous semaphore to the supervisor to print
     Sem_post ( printPermission_sem ) ;
-    printf("SALES: Permission granted to print final report\n");
-    fflush(stdout);
+    printf("SALES: Permission granted to print final report\n") ;
+    fflush(stdout) ;
 
     //wait for children/clean up
-    printf("SALES: Cleaning up after the Supervisor Factory Processes");
-    fflush(stdout);
-    clean_up();
+    printf("SALES: Cleaning up after the Supervisor Factory Processes\n") ;
+    fflush(stdout) ;
+    clean_up() ;
     
 }

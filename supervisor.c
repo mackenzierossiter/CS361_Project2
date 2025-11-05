@@ -49,19 +49,19 @@ sem_t *printPermission_sem ;
 shData *p;
 int totalFactories;
 
-
+//struct for keeping track of stats for each factory
 typedef struct {
-    int facID;
-    int partsBuilt;
-    int numIterations;
-} per_factory_stats;
+    int facID         ;
+    int partsBuilt    ;
+    int numIterations ;
+} per_factory_stats   ;
 
 void clean_up() {
 
-    Shmdt(p);
+    Shmdt(p) ;
 
-    sem_close(factoriesDone_sem);
-    sem_close(printPermission_sem);
+    sem_close(factoriesDone_sem)   ;
+    sem_close(printPermission_sem) ;
 
 }
 
@@ -69,15 +69,15 @@ void clean_up() {
 int main (int argc, char *argv[]) 
 {
     //initilize number of factory lines from sales
-    activeFactories = atoi(argv[1]);
-    per_factory_stats stats[activeFactories];
-    totalFactories = activeFactories;
+    activeFactories = atoi(argv[1]) ;
+    per_factory_stats stats[activeFactories] ;
+    totalFactories = activeFactories ;
 
     //initialize factory stats
     for (int i = 0; i < activeFactories; i++) {
-        stats[i].facID = i + 1;
-        stats[i].partsBuilt = 0;
-        stats[i].numIterations = 0;
+        stats[i].facID = i + 1     ;
+        stats[i].partsBuilt = 0    ;
+        stats[i].numIterations = 0 ;
     }
 
     //access message queue
@@ -90,11 +90,11 @@ int main (int argc, char *argv[])
     }
 
     int msgflgs = S_IRUSR | S_IWUSR | S_IWOTH | S_IWGRP | S_IRGRP | S_IROTH ;
-    int msgid = Msgget(salesKey, msgflgs);
+    int msgid = Msgget(salesKey, msgflgs) ;
 
     //access sharedmem
-    key_t shmkey = ftok("shmem.h", 5) ; // was 5 on semaphore lab.  Why?
-    int shmflg = S_IRUSR | S_IWUSR ; // should group have read and write?
+    key_t shmkey = ftok("shmem.h", 5) ;
+    int shmflg = S_IRUSR | S_IWUSR ;
 
     int shmid = Shmget(shmkey, SHMEM_SIZE, shmflg) ;
 
@@ -106,45 +106,52 @@ int main (int argc, char *argv[])
     factoriesDone_sem   = Sem_open2( "/lumsdegr_factoriesDone_sem"   ,      semflg) ;
     printPermission_sem = Sem_open2( "/lumsdegr_printPermission_sem" ,      semflg) ;
 
+    //start receiving messages
+    printf("SUPERVISOR: Started\n") ;
+
     while (activeFactories > 0) {
         //need to check msgStatus
-        msgStatus = msgrcv(msgid, &factoryMsg, MSG_INFO_SIZE, 0, 0);
-        if (msgStatus != 0) {
+        msgStatus = msgrcv( msgid, &factoryMsg, MSG_INFO_SIZE, 0, 0 ) ;
+        if (msgStatus == -1) {
             perror("Failed to Recieve message");
             fflush(stdout);
             clean_up();
         }
+
+        //handle production and complete messages
         if (factoryMsg.purpose == PRODUCTION_MSG) {
-            printf("Factory %d produced %d in %d milliSecs\n", factoryMsg.facID, factoryMsg.partsMade, factoryMsg.duration);
-            stats[factoryMsg.facID].partsBuilt = factoryMsg.partsMade;
-            stats[factoryMsg.facID].numIterations++;
+            printf("SUPERVISOR: Factory #%3d produced %4d in %5d milliSecs\n", factoryMsg.facID, factoryMsg.partsMade, factoryMsg.duration) ;
+            stats[factoryMsg.facID - 1].partsBuilt += factoryMsg.partsMade ;
+            stats[factoryMsg.facID - 1].numIterations++ ;
         } else if (factoryMsg.purpose == COMPLETION_MSG) {
-            printf("Factory %d Terminated\n", factoryMsg.facID);
-            activeFactories--;
+            printf("SUPERVISOR: Factory #%3d\tCOMPLETED its task\n", factoryMsg.facID) ;
+            activeFactories-- ;
         } else {
             //do nothing i guess??
-            printf("Unsupported message");
+            printf("Unsupported message") ;
         }
-        fflush(stdout);
+        fflush(stdout) ;
     }
 
     //tell sales factories are done
-    sem_post(factoriesDone_sem);
-    printf("\nSUPERVISOR: Manufacturing is complete. Awaiting permission to print final report\n");
+    sem_post(factoriesDone_sem) ;
+    printf("\nSUPERVISOR: Manufacturing is complete. Awaiting permission to print final report\n") ;
+    fflush(stdout) ;
     //wait for permission to print
-    sem_wait(printPermission_sem);
+    sem_wait(printPermission_sem) ;
 
     //Print per-factory production aggregates sorted by Factory ID ;
-    printf("\n****** SUPERVISOR: Final Report ******\n");
+    printf("\n****** SUPERVISOR: Final Report ******\n") ;
     for (int i = 0; i < totalFactories; i++) {
-        printf("Factory # %d made a total of %3d parts in \t%d iterations\n", stats[i].facID, stats[i].partsBuilt, stats[i].numIterations);
+        printf("Factory # %d made a total of %3d parts in \t%d iterations\n", stats[i].facID, stats[i].partsBuilt, stats[i].numIterations) ;
+        fflush(stdout) ;
     }
 
-    printf("=======================\n");
-    printf("Grand total parts made =\t%d   vs   order size of \t%d\n", p->made, p->order_size);
-    printf(">>> Supervisor Terminated");
-    fflush(stdout);
+    printf("=======================\n") ;
+    printf("Grand total parts made =\t%d   vs   order size of \t%d\n", p->made, p->order_size) ;
+    printf(">>> Supervisor Terminated\n") ;
+    fflush(stdout) ;
 
-    clean_up();
+    clean_up() ;
 
 }
